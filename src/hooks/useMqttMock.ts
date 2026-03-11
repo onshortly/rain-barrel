@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { DeviceState, BarrelStatus } from "./useMqtt";
 import { BARREL_PROFILES } from "../consts/rainBarrels";
 
@@ -23,9 +23,9 @@ function createInitialStatus(): BarrelStatus {
 }
 
 export function useMqttMock() {
-  const statusRef = useRef<BarrelStatus>(createInitialStatus());
+  const status = createInitialStatus();
   const [deviceState, setDeviceState] = useState<DeviceState>({
-    status: statusRef.current,
+    status: status,
     lwt: { online: true },
     connected: true,
   });
@@ -33,7 +33,7 @@ export function useMqttMock() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const s = statusRef.current;
+      const s = status;
       s.uptime += 1;
 
       s.rssi = Math.round(
@@ -45,7 +45,10 @@ export function useMqttMock() {
         const flowGallonsPerSec = 1.2 / 60;
         const inchesPerSec = flowGallonsPerSec / profile.gallonsPerInch;
 
-        s.waterLevelInches = Math.max(0, s.waterLevelInches - inchesPerSec);
+        s.waterLevelInches = Math.max(
+          0,
+          s?.waterLevelInches || 0 - inchesPerSec,
+        );
         s.flowRate = Math.round(450 * (flowGallonsPerSec / 0.2642));
         s.flowPulses += s.flowRate;
 
@@ -58,10 +61,10 @@ export function useMqttMock() {
         s.flowRate = 0;
 
         // Rain fill only when valve is closed
-        if (s.waterLevelInches < profile.heightInches) {
+        if (s?.waterLevelInches || 0 < profile.heightInches) {
           s.waterLevelInches = Math.min(
             profile.heightInches,
-            s.waterLevelInches + 0.008,
+            s?.waterLevelInches || 0 + 0.008,
           );
         }
       }
@@ -73,29 +76,34 @@ export function useMqttMock() {
     }, TICK_INTERVAL);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [status]);
 
-  const sendCommand = useCallback((command: "on" | "off") => {
-    console.log(`[MOCK MQTT] Command received: ${command}`);
-    setPending(true);
+  const sendCommand = useCallback(
+    (command: "on" | "off") => {
+      console.log(`[MOCK MQTT] Command received: ${command}`);
+      setPending(true);
 
-    const latency = randomBetween(...COMMAND_LATENCY);
+      const latency = randomBetween(...COMMAND_LATENCY);
 
-    setTimeout(() => {
-      const s = statusRef.current;
-      s.led = command === "on";
-      if (!s.led) {
-        s.flowRate = 0;
-      }
+      setTimeout(() => {
+        const s = status;
+        s.led = command === "on";
+        if (!s.led) {
+          s.flowRate = 0;
+        }
 
-      setDeviceState((prev) => ({
-        ...prev,
-        status: { ...s },
-      }));
-      setPending(false);
-      console.log(`[MOCK MQTT] State confirmed after ${Math.round(latency)}ms`);
-    }, latency);
-  }, []);
+        setDeviceState((prev) => ({
+          ...prev,
+          status: { ...s },
+        }));
+        setPending(false);
+        console.log(
+          `[MOCK MQTT] State confirmed after ${Math.round(latency)}ms`,
+        );
+      }, latency);
+    },
+    [status],
+  );
 
   return { deviceState, sendCommand, pending };
 }
